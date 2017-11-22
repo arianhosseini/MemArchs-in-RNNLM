@@ -99,3 +99,17 @@ ENV/
 
 # mypy
 .mypy_cache/
+
+# Temporary folders
+tmp/
+
+# Tensorboard
+.logs/
+.saves/
+
+# Data folder
+data/*/*
+!data/*/README.md
+
+# Slurm
+*.out
