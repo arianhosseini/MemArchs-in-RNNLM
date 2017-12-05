@@ -21,6 +21,9 @@ class StackRNNModel(nn.Module):
         self.decoder = nn.Linear(ninp, ntoken)
         self.decoder.weight = self.encoder.weight_raw
 
+        self.policy_network_stack = nn.Conv1d(ninp, 2, kernel_size=2)
+        self.policy_network_input = nn.Linear(ninp, 2 * (stack_depth + 1))
+
         self.init_weights()
 
         self.ninp = ninp
@@ -33,6 +36,14 @@ class StackRNNModel(nn.Module):
         self.decoder.bias.data.fill_(0)
         self.decoder.weight.data.uniform_(-initrange, initrange)
 
+    def policy_network(self, input, memory):
+        memory_padded = F.pad(memory.transpose(1, 2), (0, 2), 'constant', 0)
+        policy_stack = self.policy_network_stack(memory_padded)
+        policy_stack = policy_stack.view(input.size(0), -1)
+        policy_input = self.policy_network_input(input)
+
+        return policy_stack + policy_input
+
     def update_stack(self, memory, p_stay, p_push, hidden):
         p_stay = p_stay.unsqueeze(2).unsqueeze(3)
         p_push = p_push.unsqueeze(2).unsqueeze(3)
@@ -44,7 +55,8 @@ class StackRNNModel(nn.Module):
             requires_grad=False)
         m_stay = F.conv2d(memory_padded, kernel)
 
-        pushed = (hidden.unsqueeze(1).repeat(1, self.stack_depth + 1, 1)
+        pushed = (hidden.unsqueeze(1).clone()
+                        .repeat(1, self.stack_depth + 1, 1)
                         .unsqueeze(2))
         m_push = torch.cat([pushed, m_stay[:, :, :-1]], dim=2)
 

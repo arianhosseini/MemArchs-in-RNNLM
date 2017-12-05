@@ -9,6 +9,20 @@ from copy import deepcopy
 from test_utils import sample_unit_simplex
 from stack import StackRNNModel
 
+def test_policy_network():
+    # Inputs
+    input_np = np.random.rand(7, 3).astype(np.float32)
+    memory_np = np.random.rand(7, 5, 3).astype(np.float32)
+
+    # Pytorch
+    input_th = Variable(torch.from_numpy(input_np))
+    memory_th = Variable(torch.from_numpy(memory_np))
+
+    model = StackRNNModel(2, 3, stack_depth=5)
+    policy_th = model.policy_network(input_th, memory_th)
+
+    assert policy_th.size() == (7, 2 * (5 + 1))
+
 def test_update_stack():
     # Inputs
     memory_np = np.random.rand(7, 5, 3).astype(np.float32)
