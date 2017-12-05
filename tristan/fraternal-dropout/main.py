@@ -47,7 +47,7 @@ parser.add_argument('--cuda', action='store_false',
                     help='not use CUDA')
 parser.add_argument('--log_interval', type=int, default=100, metavar='N',
                     help='report interval')
-parser.add_argument('--save_dir', type=str,  default='output/',
+parser.add_argument('--save_dir', type=str,  default='output',
                     help='dir path to save the log and the final model')
 randomhash = ''.join(str(time.time()).split('.'))
 parser.add_argument('--name', type=str,  default=randomhash,
