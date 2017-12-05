@@ -26,6 +26,7 @@ class StackRNNModel(nn.Module):
 
         self.policy_network_stack = nn.Conv1d(ninp, 2, kernel_size=2)
         self.policy_network_input = nn.Linear(ninp, 2 * (stack_depth + 1))
+        self.read_stack = nn.Linear(2 * ninp, ninp, bias=False)
 
         self.init_weights()
 
@@ -76,12 +77,13 @@ class StackRNNModel(nn.Module):
             hidden = self.lstm_cell(input, hidden)
             output = self.drop(draw_mask_o, hidden[0])
 
-            raw_output_list.append(hidden[0])
-            output_list.append(output)
-
             policy = self.policy_network(input, memory)
             p_stay, p_push = torch.chunk(policy, 2, dim=1)
             memory = self.update_stack(memory, p_stay, p_push, hidden[0])
+
+            output = self.read_stack(torch.cat([output, memory[:, 0]], dim=1))
+            raw_output_list.append(hidden[0])
+            output_list.append(output)
 
         raw_output = torch.stack(raw_output_list, dim=0)
         output = torch.stack(output_list, dim=0)
