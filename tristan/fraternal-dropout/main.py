@@ -10,6 +10,7 @@ from torch.autograd import Variable
 
 import data
 import model
+import stack
 
 from utils import batchify, get_batch, repackage_hidden
 
@@ -20,6 +21,8 @@ parser.add_argument('--model', type=str, default='custom',
                     help='FD|ELD|PM for prepared models or anything else for custom settings')
 parser.add_argument('--emsize', type=int, default=655,
                     help='size of word embeddings')
+parser.add_argument('--stack_depth', type=int, default=10,
+                    help='maximum depth of the stack')
 parser.add_argument('--lr', type=float, default=30,
                     help='initial learning rate')
 parser.add_argument('--clip', type=float, default=0.25,
@@ -117,7 +120,8 @@ test_data = batchify(corpus.test, test_batch_size, args)
 ###############################################################################
 
 ntokens = len(corpus.dictionary)
-model = model.RNNModel(ntokens, args.emsize, args.dropout, args.dropouti, args.dropoute, args.wdrop)
+# model = model.RNNModel(ntokens, args.emsize, args.dropout, args.dropouti, args.dropoute, args.wdrop)
+model = stack.StackRNNModel(ntokens, args.emsize, args.dropout, args.dropouti, args.dropoute, args.wdrop, args.stack_depth)
 if args.cuda:
     model.cuda()
 total_params = sum(x.size()[0] * x.size()[1] if len(x.size()) > 1 else x.size()[0] for x in model.parameters())
@@ -148,9 +152,10 @@ def evaluate(data_source, batch_size=10):
     total_loss = 0
     ntokens = len(corpus.dictionary)
     hidden = model.init_hidden(batch_size)
+    memory = model.init_memory(batch_size)
     for i in range(0, data_source.size(0) - 1, args.bptt):
         data, targets = get_batch(data_source, i, args, evaluation=True)
-        output, hidden = model(data, hidden)
+        output, hidden, memory = model(data, hidden, memory)
         output_flat = output.view(-1, ntokens)
         total_loss += len(data) * criterion(output_flat, targets).data
         hidden = repackage_hidden(hidden)
@@ -165,6 +170,7 @@ def train():
     start_time = time.time()
     ntokens = len(corpus.dictionary)
     hidden = model.init_hidden(args.batch_size)
+    memory = model.init_memory(args.batch_size)
     batch, i = 0, 0
     while i < train_data.size(0) - 1 - 1:
         bptt = args.bptt if np.random.random() < 0.95 else args.bptt / 2.
@@ -181,12 +187,14 @@ def train():
         # If we didn't, the model would try backpropagating all the way to start of the dataset.
         if np.random.random() < 0.01:
             hidden = model.init_hidden(args.batch_size)
+            memory = model.init_memory(args.batch_size)
         else:
             hidden = repackage_hidden(hidden)
+            memory = repackage_hidden(memory)
         optimizer.zero_grad()
 
         model.train()
-        output, new_hidden, rnn_h, dropped_rnn_h = model(data, hidden, return_h=True)
+        output, new_hidden, new_memory, rnn_h, dropped_rnn_h = model(data, hidden, memory, return_h=True)
         raw_loss = criterion(output.view(-1, ntokens), targets)
         
         total_loss += raw_loss.data
@@ -204,7 +212,7 @@ def train():
             if args.eval_auxiliary:
                 model.eval()
 
-            kappa_output, _, _, _ = model(data, hidden, return_h=True,
+            kappa_output, _, _, _, _ = model(data, hidden, memory, return_h=True,
                                           draw_mask_e=dm_e, draw_mask_i=dm_i, draw_mask_w=dm_w, draw_mask_o=dm_o)
             
             if args.double_target:
@@ -227,6 +235,7 @@ def train():
         torch.nn.utils.clip_grad_norm(model.parameters(), args.clip)
         optimizer.step()
         hidden = new_hidden
+        memory = new_memory
 
         optimizer.param_groups[0]['lr'] = lr2
         if batch % args.log_interval == 0 and batch > 0:
@@ -235,8 +244,7 @@ def train():
             print('epoch {:3d} | {:5d}/{:5d} batches | lr {:02.2f} | ms/batch {:5.2f} | '
                     'loss {:5.2f} | ppl {:8.2f}'.format(
                 epoch, batch, len(train_data) // args.bptt, optimizer.param_groups[0]['lr'],
-                elapsed * 1000 / args.log_interval, cur_loss, math.exp(cur_loss)),
-                flush=True)
+                elapsed * 1000 / args.log_interval, cur_loss, math.exp(cur_loss)))
             total_loss = 0
             start_time = time.time()
         ###
@@ -280,7 +288,7 @@ try:
                 't ppl {:5.2f} | v loss {:3.2f} | v ppl {:5.2f} | pat {:2d}'
                 .format(epoch, (time.time() - epoch_start_time),
                 train_running_loss, math.exp(train_running_loss),
-                val_loss, math.exp(val_loss), patience), flush=True)
+                val_loss, math.exp(val_loss), patience))
         print('-' * 89)
         with open(args.save_dir + args.log_file_name, 'a') as f:
             f.write(str(epoch) + ' ' + str(time.time() - epoch_start_time) + ' ' +

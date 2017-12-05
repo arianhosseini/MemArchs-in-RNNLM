@@ -6,7 +6,7 @@ from torch.autograd import Variable
 
 from copy import deepcopy
 
-from test_utils import sample_unit_simplex
+from test_utils import sample_unit_simplex, is_in_unit_simplex
 from stack import StackRNNModel
 
 def test_policy_network():
@@ -22,6 +22,7 @@ def test_policy_network():
     policy_th = model.policy_network(input_th, memory_th)
 
     assert policy_th.size() == (7, 2 * (5 + 1))
+    assert is_in_unit_simplex(policy_th.data.numpy(), axis=1)
 
 def test_update_stack():
     # Inputs

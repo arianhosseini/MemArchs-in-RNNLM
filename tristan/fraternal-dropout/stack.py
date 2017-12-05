@@ -17,7 +17,10 @@ class StackRNNModel(nn.Module):
         self.drop = fixMaskDropout(dropout)
         self.encoder = nn.Embedding(ntoken, ninp, padding_idx=0)
         self.embedded_dropout = fixMaskEmbeddedDropout(self.encoder, dropoute)
-        self.lstm = WeightDrop(torch.nn.LSTM(ninp, ninp), ['weight_hh_l0'], dropout=wdrop)
+
+        # self.lstm = WeightDrop(torch.nn.LSTM(ninp, ninp), ['weight_hh_l0'], dropout=wdrop)
+        self.lstm_cell = nn.LSTMCell(ninp, ninp)
+
         self.decoder = nn.Linear(ninp, ntoken)
         self.decoder.weight = self.encoder.weight_raw
 
@@ -42,7 +45,7 @@ class StackRNNModel(nn.Module):
         policy_stack = policy_stack.view(input.size(0), -1)
         policy_input = self.policy_network_input(input)
 
-        return policy_stack + policy_input
+        return F.softmax(policy_stack + policy_input, dim=1)
 
     def update_stack(self, memory, p_stay, p_push, hidden):
         p_stay = p_stay.unsqueeze(2).unsqueeze(3)
@@ -63,22 +66,39 @@ class StackRNNModel(nn.Module):
         return (torch.sum(m_stay * p_stay, dim=1)
                 + torch.sum(m_push * p_push, dim=1))
 
-    def forward(self, input, hidden, return_h=False, draw_mask_e=True, draw_mask_i=True, draw_mask_w=True, draw_mask_o=True):
-        emb = self.embedded_dropout(draw_mask_e, input)
+    def forward(self, inputs, hidden, memory, return_h=False, draw_mask_e=True, draw_mask_i=True, draw_mask_w=True, draw_mask_o=True):
+        emb = self.embedded_dropout(draw_mask_e, inputs)
         
         emb_i = self.idrop(draw_mask_i, emb)
 
-        raw_output, hidden = self.lstm(draw_mask_w, emb_i, hidden)
-        output = self.drop(draw_mask_o, raw_output)
+        raw_output_list, output_list = list(), list()
+        for input in emb_i:
+            hidden = self.lstm_cell(input, hidden)
+            output = self.drop(draw_mask_o, hidden[0])
 
-        decoded = self.decoder(output.view(output.size(0)*output.size(1), output.size(2)))
+            raw_output_list.append(hidden[0])
+            output_list.append(output)
+
+            policy = self.policy_network(input, memory)
+            p_stay, p_push = torch.chunk(policy, 2, dim=1)
+            memory = self.update_stack(memory, p_stay, p_push, hidden[0])
+
+        raw_output = torch.stack(raw_output_list, dim=0)
+        output = torch.stack(output_list, dim=0)
+
+        decoded = self.decoder(output.view(output.size(0) * output.size(1), output.size(2)))
         result = decoded.view(output.size(0), output.size(1), decoded.size(1))
 
         if return_h:
-            return result, hidden, raw_output, output
-        return result, hidden
+            return result, hidden, memory, raw_output, output
+
+        return result, hidden, memory
 
     def init_hidden(self, bsz):
         weight = next(self.parameters()).data
-        return (Variable(weight.new(1, bsz, self.ninp).zero_()),
-                Variable(weight.new(1, bsz, self.ninp).zero_()))
+        return (Variable(weight.new(bsz, self.ninp).zero_()),
+                Variable(weight.new(bsz, self.ninp).zero_()))
+
+    def init_memory(self, bsz):
+        weight = next(self.parameters()).data
+        return Variable(weight.new(bsz, self.stack_depth, self.ninp).zero_())
