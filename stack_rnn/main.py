@@ -1,5 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-
 import argparse
 import time
 import math
@@ -12,14 +10,17 @@ from torch.autograd import Variable
 
 import data
 import model
+import stack
 
 from utils import batchify, get_batch, repackage_hidden
 
 parser = argparse.ArgumentParser(description='PyTorch PennTreeBank RNN/LSTM Language Model')
 parser.add_argument('--data', type=str, default='../data/penn/',
                     help='location of the data corpus')
-parser.add_argument('--emsize', type=int, default=855,
+parser.add_argument('--emsize', type=int, default=655,
                     help='size of word embeddings')
+parser.add_argument('--stack_depth', type=int, default=10,
+                    help='maximum depth of the stack')
 parser.add_argument('--lr', type=float, default=30,
                     help='initial learning rate')
 parser.add_argument('--clip', type=float, default=0.25,
@@ -44,21 +45,18 @@ parser.add_argument('--cuda', action='store_false',
                     help='not use CUDA')
 parser.add_argument('--log_interval', type=int, default=100, metavar='N',
                     help='report interval')
-parser.add_argument('--save_dir', type=str,  default='output/',
+parser.add_argument('--save_dir', type=str,  default='output',
                     help='dir path to save the log and the final model')
 randomhash = ''.join(str(time.time()).split('.'))
 parser.add_argument('--name', type=str,  default=randomhash,
                     help='path to save the final model')
-parser.add_argument('--alpha', type=float, default=0.0,
+parser.add_argument('--alpha', type=float, default=0,
                     help='alpha L2 regularization on RNN activation (alpha = 0 means no regularization)')
 parser.add_argument('--beta', type=float, default=0,
                     help='beta slowness regularization applied on RNN activiation (beta = 0 means no regularization)')
 parser.add_argument('--wdecay', type=float, default=1.2e-6,
                     help='weight decay applied to all weights')
-parser.add_argument('--k', type=int, default=3,
-                    help='number of previous hidden states to attend to')
 args = parser.parse_args()
-
 
 args.model_file_name = '/' + args.name + '.pt'
 args.log_file_name = '/' + args.name + '.log'
@@ -89,7 +87,7 @@ test_data = batchify(corpus.test, test_batch_size, args)
 
 ntokens = len(corpus.dictionary)
 
-model = model.RNNModel(ntokens, args.emsize, args.dropout, args.dropouti, args.dropoute, args.wdrop, args.k)
+model = stack.StackRNNModel(ntokens, args.emsize, args.dropout, args.dropouti, args.dropoute, args.wdrop, args.stack_depth)
 if args.cuda:
     model.cuda()
 total_params = sum(x.size()[0] * x.size()[1] if len(x.size()) > 1 else x.size()[0] for x in model.parameters())
@@ -120,9 +118,10 @@ def evaluate(data_source, batch_size=10):
     total_loss = 0
     ntokens = len(corpus.dictionary)
     hidden = model.init_hidden(batch_size)
+    memory = model.init_memory(batch_size)
     for i in range(0, data_source.size(0) - 1, args.bptt):
         data, targets = get_batch(data_source, i, args, evaluation=True)
-        output, hidden = model(data, hidden)
+        output, hidden, memory = model(data, hidden, memory)
         output_flat = output.view(-1, ntokens)
         total_loss += len(data) * criterion(output_flat, targets).data
         hidden = repackage_hidden(hidden)
@@ -137,6 +136,7 @@ def train():
     start_time = time.time()
     ntokens = len(corpus.dictionary)
     hidden = model.init_hidden(args.batch_size)
+    memory = model.init_memory(args.batch_size)
     batch, i = 0, 0
     while i < train_data.size(0) - 1 - 1:
         bptt = args.bptt if np.random.random() < 0.95 else args.bptt / 2.
@@ -153,12 +153,14 @@ def train():
         # If we didn't, the model would try backpropagating all the way to start of the dataset.
         if np.random.random() < 0.01:
             hidden = model.init_hidden(args.batch_size)
+            memory = model.init_memory(args.batch_size)
         else:
             hidden = repackage_hidden(hidden)
+            memory = repackage_hidden(memory)
         optimizer.zero_grad()
 
         model.train()
-        output, new_hidden, rnn_h, dropped_rnn_h = model(data, hidden, return_h=True)
+        output, new_hidden, new_memory, rnn_h, dropped_rnn_h = model(data, hidden, memory, return_h=True)
         raw_loss = criterion(output.view(-1, ntokens), targets)
 
         total_loss += raw_loss.data
@@ -179,12 +181,13 @@ def train():
         torch.nn.utils.clip_grad_norm(model.parameters(), args.clip)
         optimizer.step()
         hidden = new_hidden
+        memory = new_memory
 
         optimizer.param_groups[0]['lr'] = lr2
         if batch % args.log_interval == 0 and batch > 0:
             cur_loss = total_loss[0] / args.log_interval
             elapsed = time.time() - start_time
-            print('epoch {:3d} | {:5d}/{:5d} batches | lr {:02.6f} | ms/batch {:5.2f} | '
+            print('epoch {:3d} | {:5d}/{:5d} batches | lr {:02.2f} | ms/batch {:5.2f} | '
                     'loss {:5.2f} | ppl {:8.2f}'.format(
                 epoch, batch, len(train_data) // args.bptt, optimizer.param_groups[0]['lr'],
                 elapsed * 1000 / args.log_interval, cur_loss, math.exp(cur_loss)))
@@ -202,7 +205,6 @@ patience = 0
 
 # At any point you can hit Ctrl + C to break out of training early.
 try:
-    # optimizer = torch.optim.RMSprop(model.parameters(), lr=args.lr)
     optimizer = torch.optim.SGD(model.parameters(), lr=args.lr, weight_decay=args.wdecay)
     for epoch in range(1, args.epochs+1):
         epoch_start_time = time.time()
@@ -220,7 +222,7 @@ try:
             if patience > 20:
                 patience = 0
                 best_val_loss = None
-                lr /= 1
+                lr /= 3
                 if lr < 0.1:
                     print('Learning rate is too small to continue. This is the end.')
                     break

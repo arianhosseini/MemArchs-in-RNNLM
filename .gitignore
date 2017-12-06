@@ -100,6 +100,23 @@ ENV/
 # mypy
 .mypy_cache/
 
+
 */data/
 .DS_Store
+._.DS_Store
+*/._.DS_Store
 */output/
+=======
+# Temporary folders
+tmp/
+
+# Tensorboard
+.logs/
+.saves/
+
+# Data folder
+data/*/*
+!data/*/README.md
+
+# Slurm
+*.out
