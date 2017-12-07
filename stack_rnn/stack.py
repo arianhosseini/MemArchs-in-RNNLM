@@ -10,7 +10,7 @@ from model import fixMaskDropout
 class StackRNNModel(nn.Module):
     """Container module with an encoder, a recurrent module, and a decoder."""
 
-    def __init__(self, ntoken, ninp, dropout=0.5, dropouti=0.5,
+    def __init__(self, ntoken, ninp, cuda, dropout=0.5, dropouti=0.5,
                  dropoute=0.1, wdrop=0, tie_weights=False, stack_depth=10):
         super(StackRNNModel, self).__init__()
         self.idrop = fixMaskDropout(dropouti)
@@ -27,6 +27,11 @@ class StackRNNModel(nn.Module):
         self.policy_network_stack = nn.Conv1d(ninp, 2, kernel_size=2)
         self.policy_network_input = nn.Linear(ninp, 2 * (stack_depth + 1))
         self.read_stack = nn.Linear(2 * ninp, ninp, bias=False)
+        self.update_kernel = Variable(torch.eye(stack_depth + 1).view(
+            stack_depth + 1, 1, stack_depth + 1, 1),
+            requires_grad=False)
+        if cuda:
+            self.update_kernel = self.update_kernel.cuda()
 
         self.init_weights()
 
@@ -54,10 +59,8 @@ class StackRNNModel(nn.Module):
 
         memory_padded = F.pad(memory.unsqueeze(1),
             (0, 0, 0, self.stack_depth), 'constant', 0)
-        kernel = Variable(torch.eye(self.stack_depth + 1).view(
-            self.stack_depth + 1, 1, self.stack_depth + 1, 1),
-            requires_grad=False)
-        m_stay = F.conv2d(memory_padded, kernel)
+
+        m_stay = F.conv2d(memory_padded, self.update_kernel)
 
         pushed = (hidden.unsqueeze(1).clone()
                         .repeat(1, self.stack_depth + 1, 1)
@@ -69,7 +72,6 @@ class StackRNNModel(nn.Module):
 
     def forward(self, inputs, hidden, memory, return_h=False, draw_mask_e=True, draw_mask_i=True, draw_mask_w=True, draw_mask_o=True):
         emb = self.embedded_dropout(draw_mask_e, inputs)
-        
         emb_i = self.idrop(draw_mask_i, emb)
 
         raw_output_list, output_list = list(), list()
@@ -87,7 +89,7 @@ class StackRNNModel(nn.Module):
 
         raw_output = torch.stack(raw_output_list, dim=0)
         output = torch.stack(output_list, dim=0)
-
+        output = self.drop(draw_mask_o, output)
         decoded = self.decoder(output.view(output.size(0) * output.size(1), output.size(2)))
         result = decoded.view(output.size(0), output.size(1), decoded.size(1))
 

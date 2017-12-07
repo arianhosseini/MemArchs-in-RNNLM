@@ -18,7 +18,7 @@ from utils import batchify, get_batch, repackage_hidden
 parser = argparse.ArgumentParser(description='PyTorch PennTreeBank RNN/LSTM Language Model')
 parser.add_argument('--data', type=str, default='../data/penn/',
                     help='location of the data corpus')
-parser.add_argument('--emsize', type=int, default=855,
+parser.add_argument('--emsize', type=int, default=755,
                     help='size of word embeddings')
 parser.add_argument('--lr', type=float, default=30,
                     help='initial learning rate')

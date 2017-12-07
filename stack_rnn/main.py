@@ -87,7 +87,7 @@ test_data = batchify(corpus.test, test_batch_size, args)
 
 ntokens = len(corpus.dictionary)
 
-model = stack.StackRNNModel(ntokens, args.emsize, args.dropout, args.dropouti, args.dropoute, args.wdrop, args.stack_depth)
+model = stack.StackRNNModel(ntokens, args.emsize, args.cuda, args.dropout, args.dropouti, args.dropoute, args.wdrop, args.stack_depth)
 if args.cuda:
     model.cuda()
 total_params = sum(x.size()[0] * x.size()[1] if len(x.size()) > 1 else x.size()[0] for x in model.parameters())
