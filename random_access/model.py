@@ -84,6 +84,7 @@ class RNNModel(nn.Module):
                 hiddens.append(h_t)
                 # print "newh shape: ", new_h_t.size()
             else:
+                new_h_t = h_t
                 raw_output.append(h_t)
 
 
