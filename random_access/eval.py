@@ -11,7 +11,7 @@ import data
 from utils import batchify, get_batch, repackage_hidden
 
 parser = argparse.ArgumentParser(description='PyTorch PennTreeBank RNN/LSTM Language Model')
-parser.add_argument('--data', type=str, default='/u/zolnakon/repos/awd-lstm-lm/data/penn/',
+parser.add_argument('--data', type=str, default='../data/penn/',
                     help='location of the data corpus')
 parser.add_argument('--bptt', type=int, default=70,
                     help='sequence length')
@@ -21,7 +21,7 @@ randomhash = ''.join(str(time.time()).split('.'))
 parser.add_argument('--model_path', type=str,  default='PTB.pt', #'/data/lisa/exp/zolnakon/last/40738.pt',
                     help='path to save the final model')
 args = parser.parse_args()
-
+print ("Using cuda: ", args.cuda)
 ###############################################################################
 # Load data
 ###############################################################################
@@ -29,7 +29,7 @@ args = parser.parse_args()
 corpus = data.Corpus(args.data)
 
 eval_batch_size = 10
-test_batch_size = 1
+test_batch_size = 10
 train_data = batchify(corpus.train, eval_batch_size, args)
 val_data = batchify(corpus.valid, eval_batch_size, args)
 test_data = batchify(corpus.test, test_batch_size, args)
@@ -60,11 +60,14 @@ total_params = sum(x.size()[0] * x.size()[1] if len(x.size()) > 1 else x.size()[
 print('Model total parameters:', total_params)
 
 criterion = nn.CrossEntropyLoss()
-    
+
 # Run on test data.
 train_loss = evaluate(train_data)
+print ("Done with trainset")
 val_loss = evaluate(val_data)
+print ("Done with validset")
 test_loss = evaluate(test_data, test_batch_size)
+print ("Done with testset")
 print('=' * 89)
 print('| Evaluation | train ppl {:8.4f} | val ppl {:8.4f} | test ppl {:8.4f}'.format(
     math.exp(train_loss), math.exp(val_loss), math.exp(test_loss)))

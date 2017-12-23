@@ -220,7 +220,7 @@ try:
             if patience > 20:
                 patience = 0
                 best_val_loss = None
-                lr /= 1
+                lr /= 3
                 if lr < 0.1:
                     print('Learning rate is too small to continue. This is the end.')
                     break
