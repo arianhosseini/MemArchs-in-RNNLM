@@ -7,4 +7,4 @@ source $HOME/.bashrc
 source activate deleutri
 
 # Run the script
-python main.py --model FD
+python main.py $@
